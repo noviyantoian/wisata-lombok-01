@@ -1,0 +1,79 @@
+# Gateway nginx wisata-lombok-01 di Dokploy — meniru vhost VPS lama (body 25M, timeout 300s) + header global conf.d/security-headers.conf.
+# - TLS diterminasi Traefik; container ini HTTP :80 saja.
+# - Situs di-proxy Cloudflare: IP pengunjung dari CF-Connecting-IP, hanya bila
+#   koneksi memang datang dari rentang IP Cloudflare (X-Real-IP dari Traefik).
+
+geo $http_x_real_ip $dari_cloudflare {
+    default 0;
+    173.245.48.0/20        1;
+    103.21.244.0/22        1;
+    103.22.200.0/22        1;
+    103.31.4.0/22          1;
+    141.101.64.0/18        1;
+    108.162.192.0/18       1;
+    190.93.240.0/20        1;
+    188.114.96.0/20        1;
+    197.234.240.0/22       1;
+    198.41.128.0/17        1;
+    162.158.0.0/15         1;
+    104.16.0.0/13          1;
+    104.24.0.0/14          1;
+    172.64.0.0/13          1;
+    131.0.72.0/22          1;
+    2400:cb00::/32         1;
+    2606:4700::/32         1;
+    2803:f800::/32         1;
+    2405:b500::/32         1;
+    2405:8100::/32         1;
+    2a06:98c0::/29         1;
+    2c0f:f248::/32         1;
+}
+
+map $dari_cloudflare $client_ip {
+    1       $http_cf_connecting_ip;
+    default $http_x_real_ip;
+}
+
+map $http_x_forwarded_proto $fwd_proto {
+    ""      $scheme;
+    default $http_x_forwarded_proto;
+}
+
+upstream wisata {
+    server ${WEB_UPSTREAM};
+    keepalive 16;
+}
+
+server_tokens off;
+
+server {
+    listen 80 default_server;
+    server_name _;
+    location = /__health { access_log off; default_type text/plain; return 200 "ok\n"; }
+    location / { return 404; }
+}
+
+server {
+    listen 80;
+    server_name wisata-lombok-01.folkastudio.com;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    gzip on;
+    client_max_body_size 25M;
+
+    location / {
+        proxy_pass         http://wisata;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection        "";
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $client_ip;
+        proxy_set_header   X-Forwarded-For   $client_ip;
+        proxy_set_header   X-Forwarded-Proto $fwd_proto;
+        proxy_set_header   X-Forwarded-Host  $host;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
